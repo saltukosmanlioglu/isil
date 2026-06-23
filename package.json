@@ -3,15 +3,29 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "prisma generate && prisma db push && next dev",
+    "build": "prisma generate && next build",
+    "db:init": "prisma generate && prisma db push",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "sample:excel": "node scripts/create-sample-excel.mjs",
+    "seed:demo-dashboard": "node --env-file=.env scripts/seed-demo-dashboard.mjs",
+    "clear:demo-dashboard": "node --env-file=.env scripts/seed-demo-dashboard.mjs --clear",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.105.0",
+    "@prisma/client": "^6.19.3",
+    "lucide-react": "^1.21.0",
+    "mammoth": "^1.12.0",
     "next": "16.2.9",
+    "pdf-parse": "^2.4.5",
+    "prisma": "^6.19.3",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "recharts": "^3.9.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

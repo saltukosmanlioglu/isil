@@ -1,65 +1,214 @@
-import Image from "next/image";
+import type { Teklif, TeklifKalemi, Urun } from "@prisma/client";
+import { Dashboard, type DashboardData } from "@/app/ui/dashboard";
+import { DURUM, TEKLIF_DURUM } from "@/lib/constants";
+import { prisma } from "@/lib/prisma";
+import { ensureSeedData } from "@/lib/seed";
 
-export default function Home() {
-  return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+export const dynamic = "force-dynamic";
+
+type QuoteRecord = Teklif & { kalemler: TeklifKalemi[] };
+
+export default async function Home() {
+  await ensureSeedData();
+
+  const [products, quotes] = await Promise.all([
+    prisma.urun.findMany({ orderBy: { kod: "asc" } }),
+    prisma.teklif.findMany({
+      orderBy: { createdAt: "desc" },
+      include: { kalemler: true },
+    }),
+  ]);
+
+  return <Dashboard data={createDashboardData(products, quotes)} />;
+}
+
+function createDashboardData(products: Urun[], quotes: QuoteRecord[]): DashboardData {
+  const quoteTotals = new Map(quotes.map((quote) => [quote.id, quoteTotal(quote)]));
+  const allLines = quotes.flatMap((quote) => quote.kalemler);
+  const activeLines = allLines.filter((line) => line.durum !== DURUM.IPTAL_EDILDI);
+  // Lines with no catalog match that haven't been resolved via custom pricing
+  const unmatchedLines = allLines.filter(
+    (line) => !line.eslesenUrunKodu && line.durum !== DURUM.MANUEL_ONAYLANDI,
   );
+  const acceptedQuotes = quotes.filter(
+    (quote) => quote.durum === TEKLIF_DURUM.KABUL_EDILDI,
+  );
+  const rejectedQuotes = quotes.filter(
+    (quote) => quote.durum === TEKLIF_DURUM.REDDEDILDI,
+  );
+  const resolvedQuoteValue =
+    acceptedQuotes.reduce(
+      (total, quote) => total + (quote.kabulEdilenTutar ?? quoteTotals.get(quote.id) ?? 0),
+      0,
+    ) +
+    rejectedQuotes.reduce((total, quote) => total + (quote.reddedildiTutar ?? quoteTotals.get(quote.id) ?? 0), 0);
+  const acceptedOfferValue = acceptedQuotes.reduce(
+    (total, quote) => total + (quote.kabulEdilenTutar ?? quoteTotals.get(quote.id) ?? 0),
+    0,
+  );
+
+  return {
+    productCount: products.length,
+    quoteCount: quotes.length,
+    totalOfferValue: Array.from(quoteTotals.values()).reduce((total, value) => total + value, 0),
+    acceptedOfferValue,
+    waitingOfferValue: quotes
+      .filter((quote) => quote.durum === TEKLIF_DURUM.GONDERILDI)
+      .reduce((total, quote) => total + (quoteTotals.get(quote.id) ?? 0), 0),
+    acceptanceRate: resolvedQuoteValue > 0 ? (acceptedOfferValue / resolvedQuoteValue) * 100 : 0,
+    matching: [
+      {
+        label: "Otomatik eşleşen",
+        value: activeLines.filter((line) => line.durum === DURUM.OTOMATIK).length,
+        color: "#4F8A5B",
+      },
+      {
+        label: "Manuel onaylanan",
+        value: activeLines.filter((line) => line.durum === DURUM.MANUEL_ONAYLANDI).length,
+        color: "#1D4ED8",
+      },
+      {
+        label: "İnceleme bekleyen",
+        value: activeLines.filter(
+          (line) => !!line.eslesenUrunKodu && line.durum === DURUM.MANUEL_INCELEME,
+        ).length,
+        color: "#D97706",
+      },
+      {
+        label: "Eşleşme bekleyen",
+        value: activeLines.filter(
+          (line) => !line.eslesenUrunKodu && line.durum === DURUM.MANUEL_INCELEME,
+        ).length,
+        color: "#64748B",
+      },
+      {
+        label: "İptal edilen",
+        value: allLines.filter((line) => line.durum === DURUM.IPTAL_EDILDI).length,
+        color: "#DC2626",
+      },
+    ],
+    lifecycle: [
+      {
+        label: "Taslak",
+        value: quotes.filter((quote) => quote.durum === TEKLIF_DURUM.TASLAK).length,
+        color: "#64748B",
+      },
+      {
+        label: "Gönderildi",
+        value: quotes.filter((quote) => quote.durum === TEKLIF_DURUM.GONDERILDI).length,
+        color: "#1D4ED8",
+      },
+      {
+        label: "Kabul edildi",
+        value: acceptedQuotes.length,
+        color: "#4F8A5B",
+      },
+      {
+        label: "Reddedildi",
+        value: rejectedQuotes.length,
+        color: "#DC2626",
+      },
+    ],
+    monthly: monthlyData(quotes, quoteTotals),
+    unmatchedCategories: groupedCounts(unmatchedLines, (line) => line.kategori ?? "Kategorisiz"),
+    catalogCategories: groupedCounts(products, (product) => product.kategori),
+    confidence: confidenceBuckets(activeLines),
+    topUnmatched: topUnmatched(unmatchedLines),
+  };
+}
+
+function quoteTotal(quote: QuoteRecord) {
+  return quote.kalemler
+    .filter((line) => line.durum !== DURUM.IPTAL_EDILDI)
+    .reduce((total, line) => total + (line.toplam ?? 0), 0);
+}
+
+function monthlyData(quotes: QuoteRecord[], quoteTotals: Map<string, number>) {
+  const formatter = new Intl.DateTimeFormat("tr-TR", { month: "short" });
+  const now = new Date();
+
+  return Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+    const month = date.getMonth();
+    const year = date.getFullYear();
+    const isInMonth = (value: Date | null) =>
+      value !== null && value.getMonth() === month && value.getFullYear() === year;
+
+    return {
+      label: formatter.format(date),
+      offered: quotes
+        .filter((quote) => isInMonth(quote.createdAt))
+        .reduce((total, quote) => total + (quoteTotals.get(quote.id) ?? 0), 0),
+      accepted: quotes
+        .filter((quote) => isInMonth(quote.kabulEdildiAt))
+        .reduce(
+          (total, quote) => total + (quote.kabulEdilenTutar ?? quoteTotals.get(quote.id) ?? 0),
+          0,
+        ),
+    };
+  });
+}
+
+function groupedCounts<T>(items: T[], getKey: (item: T) => string) {
+  const counts = new Map<string, number>();
+
+  for (const item of items) {
+    const key = getKey(item).trim() || "Kategorisiz";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return Array.from(counts, ([label, value]) => ({ label, value })).sort(
+    (left, right) => right.value - left.value || left.label.localeCompare(right.label, "tr"),
+  );
+}
+
+function confidenceBuckets(lines: TeklifKalemi[]) {
+  const buckets = [
+    { label: "Yüksek güven (%85+)", value: 0, color: "#4F8A5B" },
+    { label: "Orta güven (%70-%84)", value: 0, color: "#1D4ED8" },
+    { label: "Düşük güven (%70 altı)", value: 0, color: "#DC2626" },
+  ];
+
+  for (const line of lines) {
+    if (!line.eslesenUrunKodu || line.guvenSkoru === null) {
+      continue;
+    }
+
+    if (line.guvenSkoru >= 0.85) {
+      buckets[0].value += 1;
+    } else if (line.guvenSkoru >= 0.7) {
+      buckets[1].value += 1;
+    } else {
+      buckets[2].value += 1;
+    }
+  }
+
+  return buckets;
+}
+
+function topUnmatched(lines: TeklifKalemi[]) {
+  const items = new Map<
+    string,
+    { name: string; category: string; quantity: number; unit: string; count: number }
+  >();
+
+  for (const line of lines) {
+    const category = line.kategori ?? "Kategorisiz";
+    const key = `${line.hamMetin.toLocaleLowerCase("tr-TR")}|${category}|${line.birim}`;
+    const current = items.get(key) ?? {
+      name: line.hamMetin,
+      category,
+      quantity: 0,
+      unit: line.birim,
+      count: 0,
+    };
+
+    current.quantity += line.miktar;
+    current.count += 1;
+    items.set(key, current);
+  }
+
+  return Array.from(items.values())
+    .sort((left, right) => right.count - left.count || right.quantity - left.quantity)
+    .slice(0, 5);
 }

@@ -1,0 +1,48 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Urun {
+  id          String @id @default(cuid())
+  kod         String @unique
+  ad          String
+  kategori    String @default("Genel")
+  birim       String
+  maliyet     Float
+  marjYuzdesi Float
+  esikMiktar  Float
+}
+
+model Teklif {
+  id               String         @id @default(cuid())
+  createdAt        DateTime       @default(now())
+  durum            String         @default("taslak")
+  gonderildiAt     DateTime?
+  kabulEdildiAt    DateTime?
+  reddedildiAt     DateTime?
+  kabulEdilenTutar Float?
+  reddedildiTutar  Float?
+  isDemo           Boolean        @default(false)
+  kalemler         TeklifKalemi[]
+}
+
+model TeklifKalemi {
+  id              String  @id @default(cuid())
+  teklifId        String
+  teklif          Teklif  @relation(fields: [teklifId], references: [id], onDelete: Cascade)
+  hamMetin        String
+  miktar          Float
+  birim           String
+  eslesenUrunKodu String?
+  kategori        String?
+  guvenSkoru      Float?
+  durum           String
+  birimFiyat      Float?
+  toplam          Float?
+  sebep           String?
+}
