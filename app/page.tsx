@@ -8,21 +8,46 @@ export const dynamic = "force-dynamic";
 
 type QuoteRecord = Teklif & { kalemler: TeklifKalemi[] };
 
-export default async function Home() {
+const VALID_PERIODS = ["30", "90", "180", "all"] as const;
+type Period = (typeof VALID_PERIODS)[number];
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   await ensureSeedData();
+
+  const raw = await searchParams;
+  const period: Period = VALID_PERIODS.includes(String(raw.period) as Period)
+    ? (String(raw.period) as Period)
+    : "90";
+
+  const since =
+    period === "all"
+      ? undefined
+      : new Date(Date.now() - Number(period) * 24 * 60 * 60 * 1000);
 
   const [products, quotes] = await Promise.all([
     prisma.urun.findMany({ orderBy: { kod: "asc" } }),
     prisma.teklif.findMany({
+      where: since ? { createdAt: { gte: since } } : undefined,
       orderBy: { createdAt: "desc" },
       include: { kalemler: true },
     }),
   ]);
 
-  return <Dashboard data={createDashboardData(products, quotes)} />;
+  return <Dashboard data={createDashboardData(products, quotes, period)} />;
 }
 
-function createDashboardData(products: Urun[], quotes: QuoteRecord[]): DashboardData {
+function periodToMonths(period: Period): number {
+  if (period === "30") return 2;
+  if (period === "90") return 3;
+  if (period === "180") return 6;
+  return 12;
+}
+
+function createDashboardData(products: Urun[], quotes: QuoteRecord[], period: Period): DashboardData {
   const quoteTotals = new Map(quotes.map((quote) => [quote.id, quoteTotal(quote)]));
   const allLines = quotes.flatMap((quote) => quote.kalemler);
   const activeLines = allLines.filter((line) => line.durum !== DURUM.IPTAL_EDILDI);
@@ -109,7 +134,8 @@ function createDashboardData(products: Urun[], quotes: QuoteRecord[]): Dashboard
         color: "#DC2626",
       },
     ],
-    monthly: monthlyData(quotes, quoteTotals),
+    monthly: monthlyData(quotes, quoteTotals, periodToMonths(period)),
+    period,
     unmatchedCategories: groupedCounts(unmatchedLines, (line) => line.kategori ?? "Kategorisiz"),
     catalogCategories: groupedCounts(products, (product) => product.kategori),
     confidence: confidenceBuckets(activeLines),
@@ -123,12 +149,12 @@ function quoteTotal(quote: QuoteRecord) {
     .reduce((total, line) => total + (line.toplam ?? 0), 0);
 }
 
-function monthlyData(quotes: QuoteRecord[], quoteTotals: Map<string, number>) {
+function monthlyData(quotes: QuoteRecord[], quoteTotals: Map<string, number>, months: number) {
   const formatter = new Intl.DateTimeFormat("tr-TR", { month: "short" });
   const now = new Date();
 
-  return Array.from({ length: 6 }, (_, index) => {
-    const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+  return Array.from({ length: months }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (months - 1 - index), 1);
     const month = date.getMonth();
     const year = date.getFullYear();
     const isInMonth = (value: Date | null) =>

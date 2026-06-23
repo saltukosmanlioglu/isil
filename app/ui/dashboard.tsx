@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PeriodFilter } from "@/app/ui/period-filter";
 import {
   ArrowRight,
   BarChart3,
@@ -31,6 +32,7 @@ export type DashboardData = {
     unit: string;
     count: number;
   }>;
+  period: string;
 };
 
 export function Dashboard({ data }: { data: DashboardData }) {
@@ -49,7 +51,8 @@ export function Dashboard({ data }: { data: DashboardData }) {
             Teklif performansını, eşleşme kalitesini ve katalogdaki talep boşluklarını tek ekrandan izleyin.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <PeriodFilter current={data.period} />
           <Link href="/teklif" className="btn btn-primary">
             <FilePlus2 size={17} aria-hidden="true" />
             Teklifler
