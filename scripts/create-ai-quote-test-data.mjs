@@ -1,9 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 import * as XLSX from "xlsx";
 
-const prisma = new PrismaClient();
+const adapter = new PrismaPg(process.env.DATABASE_URL);
+const prisma = new PrismaClient({ adapter });
 
 // These codes are intentionally kept in a dedicated DEMO range so rerunning the
 // script never overwrites a product that was added through the catalog UI.
